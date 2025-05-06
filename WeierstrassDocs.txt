@@ -1,0 +1,39 @@
+Visualization of the Weierstrass Function
+
+Formula: ∑ [a^n∙cos(b^n∙πx)],
+where:
+ a is a real number between 0 and 1 (usually chosen close to 1),
+ b is a positive odd integer greater than 1, ( or b just greater than 1 if non-differentiability is not required),
+ and ab > 1 + 3π/2 (only required for non differentiability)
+
+
+
+// int main() {
+//   double *res = random_a_b();
+
+//   for (std::size_t i = 0; i < 3; i++) {
+//     printf("Array element %d: %lf\n", i, *(res + i));
+//   }
+
+//   printf("Element 0 (a) and Element 1 (b), a * b (%lf) is greater than 1 + 3 * Pi/2 (%lf)\n", *res * *(res + 1), (double)C);
+//   double x = 5;
+//   double n = 3;
+//   double y = weierstrass(res[0], res[1], x, n);
+
+//   printf("For single Point:\nx: %lf, y: %lf, n: %lf\n", x, y, n);
+
+//   double* vals = weierstrassGroup(res[0], res[1], 0, 5, n);
+
+//   int N = (int) vals[0];
+//   printf("For Point Groups of number(N): %d\n", N);
+
+//   for (std::size_t i = 0; i <= N; i++) {
+//     printf("Index: %d, x value: %lf, y value: %lf\n", i, vals[i*2+1], vals[i*2+2]);
+//   }
+
+//   delete[] res;
+
+//   return 0;
+// }
+
+
