@@ -1,6 +1,5 @@
-LIBRARY Weierstrass
 EXPORTS
-      random_a_b
-      weierstrass
-      weierstrassGroup
-      freeDblPointer
+    freeDblPointer @1
+    random_a_b @2
+    weierstrass @3
+    weierstrassGroup @4

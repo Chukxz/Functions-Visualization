@@ -1,21 +1,38 @@
 #include <iostream>
 #include <random>
-#include <math.h>
+#include <cmath>
+#include <windows.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #define C (1 + (3.0 * M_PI) / 2)
 
 using namespace std;
-
+// Function prototypes
 double random_double(double min, double max, std::mt19937 mt);
 int next_odd(int value);
+// Function to generate a valid odd b within range
 int random_valid_b(int min_b, int max_b, std::mt19937 mt);
 
-extern "C" {
-  double* random_a_b(double* a_p = nullptr, int* b_p = nullptr, int *range_p = nullptr);
-  double weierstrass(double a, double b, double x, int n = 0);
-  double* weierstrassGroup(double a, double b, double min_x, double max_x, int n = 0, int N = 100);
-  void freeDblPointer(double* arr);
-}
+// Export macro for DLL functions
+#ifndef EXPORT
+#define EXPORT __declspec(dllexport)  
+#endif
+
+// Function to generate random a and b values
+extern "C" EXPORT double* random_a_b(double* a_p = nullptr, int* b_p = nullptr, int *range_p = nullptr);
+// Weierstrass function: W(a, b, x) = sum_{n=0}^{N} a^n * cos(b^n * pi * x)
+extern "C" EXPORT double weierstrass(double a, double b, double x, int n = 0);
+// Weierstrass group function: generates N points in the range [min_x, max_x]
+// Returns an array of size N*2+1, where the first element is N,
+// followed by pairs of x and y values.
+// The y value is calculated using the Weierstrass function.
+extern "C" EXPORT double* weierstrassGroup(double a, double b, double min_x, double max_x, int n = 0, int N = 100);
+// Function to free the dynamically allocated double pointer
+// This function should be called to avoid memory leaks
+extern "C" EXPORT void freeDblPointer(double* arr);
 
 // Function to generate a random double between min and max
 double random_double(double min, double max, std::mt19937 mt) {
