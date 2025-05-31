@@ -9,6 +9,7 @@ import uuid
 import math
 import ctypes
 import types
+import os
 
 class Graph():
   def __init__(self, Tt:tt):
@@ -436,7 +437,7 @@ class GraphModel():
     self.t_x = 0.0
     self.t_y = 0.0
     self.limit = 6
-    self.dll_name_arr: list[str] = []
+    self.dll_names: list[str] = []
     self.mark_added_object_onclick = False
     self.graph.style.configure(
       "Gray.Horizontal.TScale",
@@ -1102,15 +1103,48 @@ class GraphDLLHandler():
   def __init__(self, graph: Graph):
     self.graph = graph
     self.dll_arr: list[ctypes.CDLL] = []
+    self.original_path = os.environ['PATH']
+    self.dll_folder = "./bin"  # Define the folder where DLLs are stored
+  
+  def loadDLL(self, dll_name: str):
+    return_value = -1
+    try:
+      # os.environ['PATH'] = self.dll_folder + os.pathsep + self.original_path
+      dll_path = os.path.abspath(os.path.join(self.dll_folder, dll_name))
+      print(dll_path)
+      ctypes.CDLL("./bin/Weierstrass.dll")  # Attempt to load the DLL to check if it exists and is valid
+      # Check if the DLL file exists and is a valid file
+      if not os.path.isfile(dll_path):
+        raise ValueError(f"The DLL '{dll_name}' does not exist or is improperly formatted.")
+      
+    #   # Load the DLL
+    #   if dll_name in self.graph.model.dll_names:
+    #     print(self.graph.model.dll_names, dll_path)
+    #     dll = self.graph.dll_handler.dll_arr[self.graph.model.dll_names.index(dll_name)]
+    #   else:
+    #     dll = ctypes.CDLL(dll_path)
+    #     self.dll_arr.append(dll)
+    #     self.graph.model.dll_names.append(dll_name)
+
+    #   return_value = len(self.dll_arr) - 1
+
+    # except OSError as e:
+    #   messagebox.showerror(
+    #       "DLL Load Error", 
+    #       f"Could not load the DLL '{dll_name}'.\nError: {str(e)}\n"
+    #       "Please ensure the DLL file exists in the specified folder, has the correct permissions, "
+    #       "and is compatible with your system."
+    #   )
+    #   return_value = -1
+    except ValueError:
+      return_value = -1
+    finally:
+      os.environ['PATH'] = self.original_path  # Ensure restoration of original PATH
+    return return_value
 
     # arr_dbl = (ctypes.c_double * 3)(1.0, 4.2, 2.1)
 
     # self.dll.random_a_b(ctypes.byref(ctypes.c_double(0.999)), None, None)
-
-  def loadDLL(self, dll_name: str):
-    self.dll_arr.append(ctypes.CDLL(dll_name))
-    self.graph.model.dll_name_arr.append(dll_name)
-    return len(self.dll_arr) - 1
 
 class GenericFunction():
   def __init__(self, graph: Graph):
@@ -1125,6 +1159,7 @@ class GenericFunction():
 
   def addFunction(self):
     index = self.graph.dll_handler.loadDLL(self.dll_name)
+    if index < 0: return index
     self.dll = self.graph.dll_handler.dll_arr[index]
     self.configureDLL()
     return index
@@ -1134,7 +1169,7 @@ class GenericFunction():
   
   def removeFunction(self, index: int, multiple = False):
     self.graph.dll_handler.dll_arr = self.graph.model.splice(self.graph.dll_handler.dll_arr, index, True)
-    self.graph.model.dll_name_arr = self.graph.model.splice(self.graph.model.dll_name_arr, True)
+    self.graph.model.dll_names = self.graph.model.splice(self.graph.model.dll_names, True)
     self.graph.functions_list_objs = self.graph.model.splice(self.graph.functions_list_objs, index, True)
     self.deletion_list = self.graph.model.splice(self.deletion_list, index, True)
     l = len(self.graph.functions_list_objs)
@@ -1212,13 +1247,13 @@ class WeierstrassFunction(GenericFunction):
   def __init__(self, graph: Graph):
     super().__init__(graph)
     self.function_name = "Weierstrass"
-    self.dll_name = "./Weierstrass.dll"
+    self.dll_name = "Weierstrass.dll"
     self.graph.gui.callables.append(lambda: self.graph.gui.function_list_menu.add_command(label="Add new Weierstrass Function", command=self.addFunction))
     self.graph.gui.callCallables()
   
   def addFunction(self):
     index = super().addFunction()
-    WeierstrassFunctionHelper(index, self)
+    if index >= 0: WeierstrassFunctionHelper(index, self)
 
   def configureDLL(self):
     super().configureDLL()
