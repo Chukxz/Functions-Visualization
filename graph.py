@@ -1,4 +1,3 @@
-import ctypes.wintypes
 import turtle as tt
 import tkinter as tk
 from tkinter import messagebox, simpledialog, font, ttk
@@ -7,8 +6,8 @@ from typing import Literal, Callable
 from usableScreenSize import get_usable_screen_size
 import uuid
 import math
-import ctypes
-import types
+import subprocess
+
 import os
 
 class Graph():
@@ -28,6 +27,7 @@ class Graph():
     self.functions_list_objs: list[HelperFunction] = []
     self.callback: Callable | None = None
     self.press_time: str | None = None
+    self.closePopupFuncs: list[Callable] = []
 
     self.update()
     self.model = GraphModel(self)
@@ -36,7 +36,7 @@ class Graph():
     self.objects_class = GraphObjects(self)
     self.view = GraphView(self)
     self.controller = GraphController(self)
-    self.dll_handler = GraphDLLHandler(self)
+    self.executableHandler = GraphExecutableHandler(self)
 
     self.weierstrass_function = WeierstrassFunction(self)
 
@@ -48,16 +48,21 @@ class Graph():
   def update(self):
     self.max_w, self.max_h, self.usable_w, self.usable_h = get_usable_screen_size()
 
-  def onButtonPress(self, event):
+  def onButtonPress(self, _):
     self.press_time = self.root.after(1000, self.checkLongPress) # 1 second delay
   
-  def onButtonRelease(self, event):
+  def onButtonRelease(self, _):
     # Cancel the long press check if the button is released before the time
     if self.press_time:
       self.root.after_cancel(self.press_time)
   
   def checkLongPress(self):
     if self.callback: self.callback()
+  
+  def fn(self, callback: Callable):
+    for popup_func in self.closePopupFuncs:
+      popup_func()
+    return callback()
 
 class GraphObjects():
   objects = []
@@ -437,7 +442,6 @@ class GraphModel():
     self.t_x = 0.0
     self.t_y = 0.0
     self.limit = 6
-    self.dll_names: list[str] = []
     self.mark_added_object_onclick = False
     self.graph.style.configure(
       "Gray.Horizontal.TScale",
@@ -451,7 +455,15 @@ class GraphModel():
     )
     self.graph.style.configure(
       "RedButton.TButton",
-      background="#F44336", # Medium gray slider button
+      background="#F44336", # Medium red slider button
+    )
+    self.graph.style.configure(
+      "GreenButton.TButton",
+      background="#4CAF50", # Medium green slider button
+    )
+    self.graph.style.configure(
+      "BlueButton.TButton",
+      background="#2196F3", # Medium blue slider button
     )
 
   def mod(self, num, modulus):
@@ -572,7 +584,7 @@ class GraphView():
         self.d_y += d_y
 
 
-  def execScreenDragEnd(self, event):
+  def execScreenDragEnd(self, _):
     if self.updateMode is not None and self.updateMode == "aftermove":
       self.graph.model.translateX(self.d_x)
       self.graph.model.translateY(self.d_y)
@@ -1051,7 +1063,7 @@ class GraphView():
         self.graph.model.busy = True
         self.removeArtifacts()
 
-        w, h = self.graph.getWindowSize()
+        _, h = self.graph.getWindowSize()
         self.graph.writer.ht()
         self.graph.writer.penup()
         self.graph.writer.goto(0, (-h//2) + 50)
@@ -1085,7 +1097,7 @@ class GraphController():
     self.redraw_after_id = None
     self.graph.root.bind("<Configure>", lambda event: self.redraw(event))
 
-  def redraw(self, event):
+  def redraw(self, _):
     # Cancel any pending delayed redraw calls
     if self.redraw_after_id is not None:
       self.graph.root.after_cancel(self.redraw_after_id)
@@ -1096,91 +1108,87 @@ class GraphController():
     self.updateController()
 
   def updateController(self):
-    w, h = self.graph.view.updateView()
+    _, _ = self.graph.view.updateView()
 
-
-class GraphDLLHandler():
+class GraphExecutableHandler():
+  """Handles the execution of external executables for the graph.
+  Runs an external executable asynchronously while allowing a turtle graphics window to remain responsive."""
   def __init__(self, graph: Graph):
     self.graph = graph
-    self.dll_arr: list[ctypes.CDLL] = []
-    self.original_path = os.environ['PATH']
-    self.dll_folder = "./bin"  # Define the folder where DLLs are stored
-  
-  def loadDLL(self, dll_name: str):
-    return_value = -1
+    self.executable_names: list[str] = []
+    self.executable_args: list[list[str]] = []
+    self.process: subprocess.Popen | None = None
+
+  def runExecutable(self, index: int):
+    if index < 0 or index >= len(self.executable_names): return
+    executable_name = self.executable_names[index]
+    executable_args = self.executable_args[index]
+
+    if not os.path.isfile(executable_name):
+      messagebox.showerror("File Not Found", f"The executable '{executable_name}' does not exist.")
+      return
     try:
-      # os.environ['PATH'] = self.dll_folder + os.pathsep + self.original_path
-      dll_path = os.path.abspath(os.path.join(self.dll_folder, dll_name))
-      print(dll_path)
-      ctypes.CDLL("./bin/Weierstrass.dll")  # Attempt to load the DLL to check if it exists and is valid
-      # Check if the DLL file exists and is a valid file
-      if not os.path.isfile(dll_path):
-        raise ValueError(f"The DLL '{dll_name}' does not exist or is improperly formatted.")
+      # Start your executable asynchronously
+      self.process = subprocess.Popen(
+          [executable_name, *executable_args],
+          stdout=subprocess.PIPE,
+          stderr=subprocess.PIPE,
+          text=True
+      )
+    except Exception as e:
+      messagebox.showerror("Execution Error", f"Failed to run '{executable_name}': {str(e)}")
+      return
+    
+    print(f"Running executable: {executable_name} with args: {executable_args}")
+    self.check_process()  # Start checking the process status
+
+  def check_process(self):
+    if self.process is None:
+      print("No process running.")
+      return
+    retcode = self.process.poll()  # Check if process is done
+
+    if retcode is None:
+      # Process still running: keep turtle moving or doing stuff
+      self.graph.screen.ontimer(self.check_process, 500)  # Check again after 500ms
+    else:
+      # Process finished, read output
+      stdout, stderr = self.process.communicate()
+      print("Executable finished!")
+      print("Output:\n", stdout)
+      if stderr:
+          print("Errors:\n", stderr)
+      self.process = None  # Clear the process reference
       
-    #   # Load the DLL
-    #   if dll_name in self.graph.model.dll_names:
-    #     print(self.graph.model.dll_names, dll_path)
-    #     dll = self.graph.dll_handler.dll_arr[self.graph.model.dll_names.index(dll_name)]
-    #   else:
-    #     dll = ctypes.CDLL(dll_path)
-    #     self.dll_arr.append(dll)
-    #     self.graph.model.dll_names.append(dll_name)
-
-    #   return_value = len(self.dll_arr) - 1
-
-    # except OSError as e:
-    #   messagebox.showerror(
-    #       "DLL Load Error", 
-    #       f"Could not load the DLL '{dll_name}'.\nError: {str(e)}\n"
-    #       "Please ensure the DLL file exists in the specified folder, has the correct permissions, "
-    #       "and is compatible with your system."
-    #   )
-    #   return_value = -1
-    except ValueError:
-      return_value = -1
-    finally:
-      os.environ['PATH'] = self.original_path  # Ensure restoration of original PATH
-    return return_value
-
-    # arr_dbl = (ctypes.c_double * 3)(1.0, 4.2, 2.1)
-
-    # self.dll.random_a_b(ctypes.byref(ctypes.c_double(0.999)), None, None)
+      # # Optionally stop turtle or do something else
+      # t.write("Done!", font=("Arial", 16, "normal"))
 
 class GenericFunction():
   def __init__(self, graph: Graph):
     self.graph = graph
     self.function_name = ""
-    self.dll: ctypes.CDLL | None = None
-    self.dll_name = ""
+    self.executable_name = ""
+    self.executable_args: list[str] = []
+    self.executable_index = -1
     self.popup: tk.Toplevel | None = None
     self.popupCalls: list[Callable] = []
     self.func_parameters = []
     self.deletion_list: list[bool] = []
-
-  def addFunction(self):
-    index = self.graph.dll_handler.loadDLL(self.dll_name)
-    if index < 0: return index
-    self.dll = self.graph.dll_handler.dll_arr[index]
-    self.configureDLL()
-    return index
-
-  def configureDLL(self):
-    self.deletion_list.append(False)
   
   def removeFunction(self, index: int, multiple = False):
-    self.graph.dll_handler.dll_arr = self.graph.model.splice(self.graph.dll_handler.dll_arr, index, True)
-    self.graph.model.dll_names = self.graph.model.splice(self.graph.model.dll_names, True)
+    print(f"Removing function at index {index} from the list.")
     self.graph.functions_list_objs = self.graph.model.splice(self.graph.functions_list_objs, index, True)
     self.deletion_list = self.graph.model.splice(self.deletion_list, index, True)
     l = len(self.graph.functions_list_objs)
     for i in range(l):
-      self.graph.functions_list_objs[i].index = i
-      print(self.graph.functions_list_objs[i].index)
-    
+      self.graph.functions_list_objs[i].list_index = i
+
     if not multiple:
       self.graph.gui.updateMenuBar()
       self.graph.controller.updateController()
       self.graph.functions_list_objs[index].closePopup(None)
+      print(f"Removed function at index {index} from the list.")
+  
 
   def removeFunctions(self):
     index = 0
@@ -1194,7 +1202,7 @@ class GenericFunction():
   def removeAllFunctions(self):
     delete_bool = messagebox.askyesno(title="Confirm deletion", message="Do you really want to delete all the active functions?")
     if delete_bool:
-      self.deletion_list = [True for val in self.deletion_list]
+      self.deletion_list = [True for _ in self.deletion_list]
       self.removeFunctions()
   
   def addCascade(self, menu: tk.Menu, input_label: str):
@@ -1232,6 +1240,8 @@ class GenericFunction():
     
     return minvalue, maxvalue
 
+
+
 class WeierstrassFunction(GenericFunction):
   """
   Required parameters:
@@ -1247,63 +1257,39 @@ class WeierstrassFunction(GenericFunction):
   def __init__(self, graph: Graph):
     super().__init__(graph)
     self.function_name = "Weierstrass"
-    self.dll_name = "Weierstrass.dll"
+    self.executable_name = "bin/Weierstrass.exe"
     self.graph.gui.callables.append(lambda: self.graph.gui.function_list_menu.add_command(label="Add new Weierstrass Function", command=self.addFunction))
     self.graph.gui.callCallables()
   
   def addFunction(self):
-    index = super().addFunction()
-    if index >= 0: WeierstrassFunctionHelper(index, self)
-
-  def configureDLL(self):
-    super().configureDLL()
-    self.dll.random_a_b.argtypes = [
-      ctypes.POINTER(ctypes.c_double), # double* a_p = nullptr
-      ctypes.POINTER(ctypes.c_int), # int* b_p = nullptr
-      ctypes.POINTER(ctypes.c_int) # int *range_p = nullptr
-    ]
-    self.dll.random_a_b.restype = ctypes.POINTER(ctypes.c_double)
-
-    self.dll.weierstrass.argtypes = [
-      ctypes.c_double, # double a
-      ctypes.c_double, # double b
-      ctypes.c_double, # double x
-      ctypes.c_int # int n = 0
-    ]
-    self.dll.weierstrass.restype = ctypes.c_double
-
-    self.dll.weierstrassGroup.argtypes = [
-      ctypes.c_double, # double a
-      ctypes.c_double, # double b
-      ctypes.c_double, # double min_x
-      ctypes.c_double, # double max_x
-      ctypes.c_int, # int n = 0
-      ctypes.c_int # int N = 20
-    ]
-    self.dll.weierstrassGroup.restype = ctypes.POINTER(ctypes.c_double)
-
-    self.dll.freeDblPointer.argtypes = [ctypes.POINTER(ctypes.c_double)]
-    self.dll.freeDblPointer.restype = None
+    index = len(self.graph.functions_list_objs)
+    WeierstrassFunctionHelper(index, self.executable_index, self)
+    self.deletion_list.append(False)
 
 class HelperFunction():
-  def __init__(self, index: int, generic: GenericFunction):
+  def __init__(self, list_index: int, executable_index: int, generic: GenericFunction):
     self.accessory = generic
-    self.index = index
-    self.deletion_list = []
+    self.list_index = list_index
+    self.executable_index = executable_index
     self.accessory.graph.functions_list_objs.append(self)
     self.row_count = 1
-    if index == 0: self.accessory.graph.gui.updateMenuBar()
+    self.accessory.deletion_list.append(False)
+    if list_index == 0: self.accessory.graph.gui.updateMenuBar()
     else: self.updateFunctionMenuBar()
 
   def updateFunctionMenuBar(self):
     # Generic function params
-    label = f"{self.accessory.function_name} {self.index}"
+    deletion_state = "✅"
+    if not self.accessory.deletion_list[self.list_index]:
+      deletion_state = "❌"
+    label = f"{self.list_index}: {self.accessory.function_name} {deletion_state}"
     self.accessory.graph.gui.active_functions_menu.add_command(label=label, command=lambda: self.openPopup(label))
 
   def toggleMarkFunction(self, deletion_list):
-    if deletion_list[self.index] == False:
-      deletion_list[self.index] = True
-    else: deletion_list[self.index] = False
+    if deletion_list[self.list_index] == False:
+      deletion_list[self.list_index] = True
+    else: deletion_list[self.list_index] = False
+    self.accessory.graph.gui.updateMenuBar()
     return deletion_list
 
   def openPopup(self, title: str):
@@ -1321,16 +1307,27 @@ class HelperFunction():
     y = self.accessory.graph.root.winfo_pointery()
     self.accessory.popup.geometry(f"+{x + 10}+{y + 10}")
 
+    self.accessory.graph.closePopupFuncs.append(lambda: self.closePopup(None))
+
     # Bind click outside to close
     self.accessory.graph.root.bind("<Button-1>", self.clickOutside)
     self.accessory.popup.bind("<FocusOut>", self.closePopup)
     self.accessory.popup.bind("<Escape>", self.closePopup)
 
-    removeBtn = ttk.Button(self.accessory.popup, text="Remove", style="RedButton.TButton", command=lambda: self.accessory.removeFunction(self.index, False))
+    removeBtn = ttk.Button(self.accessory.popup, text="Remove", style="RedButton.TButton", command=lambda: self.accessory.removeFunction(self.list_index, False))
     removeBtn.grid(row=0, column=0, padx=(10, 10), pady=(2,2))
+
+    runBtn = ttk.Button(self.accessory.popup, text="Run", style="GreenButton.TButton", command=lambda: self.accessory.graph.executableHandler.runExecutable(self.executable_index))
+    runBtn.grid(row=0, column=1, padx=(10, 10), pady=(2,2))
+
+    markBtn = ttk.Button(self.accessory.popup, text="Mark", style="BlueButton.TButton", command=lambda: self.toggleMarkFunction(self.accessory.deletion_list))
+    markBtn.grid(row=0, column=2, padx=(10, 10), pady=(2,2))
 
     for popupCall in self.accessory.popupCalls:
       popupCall()
+    
+    self.accessory.popup.focus_set()
+    return self.accessory.popup
 
   def clickOutside(self, event):
     if self.accessory.popup and self.accessory.popup.winfo_exists():
@@ -1340,91 +1337,95 @@ class HelperFunction():
       x2 = x1 + self.accessory.popup.winfo_width()
       y2 = y1 + self.accessory.popup.winfo_height()
 
+      print(f"Popup bounds: ({x1}, {y1}) to ({x2}, {y2})")
+      print(f"Click position: ({event.x_root}, {event.y_root})")
+
       if not (x1 <= event.x_root <= x2 and y1 <= event.y_root <= y2):
         self.closePopup(event)
 
-  def closePopup(self, event):
+  def closePopup(self, _):
     if self.accessory.popup and self.accessory.popup.winfo_exists():
       self.accessory.popup.destroy()
       self.accessory.popup = None
       self.accessory.graph.root.unbind("<Button-1")
 
 class WeierstrassFunctionHelper(HelperFunction):
-  def __init__(self, index: int, weierstrass: WeierstrassFunction):
-    super().__init__(index, weierstrass)
+  def __init__(self, list_index: int, executable_index: int, weierstrass: WeierstrassFunction):
+    super().__init__(list_index, executable_index, weierstrass)
     self.a_value = 0.1
     self.b_value = 3
+    self.range_value: str | float = "None"
     self.n_value = 20
     self.N_value = 100
-    self.setASlider()
+  #   self.setASlider()
 
-  # Parameter a functions
-  def setASlider(self):
-    self.a_slider_from_ = 0.0
-    self.a_slider_to = 1.0
-    self.a_is_gray = False
-    func = self.setAUpdater(*self.accessory.addLabelledScale(self.a_slider_from_, self.a_slider_to, self.a_value, self.row_count))
-    self.accessory.popupCalls.append(func)
-    self.row_count += 1
+  # # Parameter a functions
+  # def setASlider(self):
+  #   self.a_slider_from_ = 0.0
+  #   self.a_slider_to = 1.0
+  #   self.a_is_gray = False
+  #   func = self.setAUpdater(*self.accessory.addLabelledScale(self.a_slider_from_, self.a_slider_to, self.a_value, self.row_count))
+  #   self.accessory.popupCalls.append(func)
+  #   self.row_count += 1
 
-  def setAUpdater(self, slider: ttk.Scale, label: tk.Label, button: tk.Button, row_count: int):
-    slider.config(command=lambda: self.updateALabel(slider, label, row_count))
-    button.config(command=lambda: self.editADialog(slider, label))
+  # def setAUpdater(self, slider: ttk.Scale, label: tk.Label, button: tk.Button, row_count: int):
+  #   slider.config(command=lambda: self.updateALabel(slider, label, row_count))
+  #   button.config(command=lambda: self.editADialog(slider, label))
 
-  def updateALabel(self, slider: tk.Scale, label: tk.Label):
-    if self.a_is_gray:
-      slider.config(style="Gray.Horizontal.TScale")
-      slider.set(self.a_value)
-    else:
-      slider.config(style="Modified.Horizontal.TScale")
-      self.a_value = slider.get()
-    label.config(self.a_value)
+  # def updateALabel(self, slider: tk.Scale, label: tk.Label):
+  #   if self.a_is_gray:
+  #     slider.config(style="Gray.Horizontal.TScale")
+  #     slider.set(self.a_value)
+  #   else:
+  #     slider.config(style="Modified.Horizontal.TScale")
+  #     self.a_value = slider.get()
+  #   label.config(self.a_value)
 
-  def editADialog(self, slider: tk.Scale, label: tk.Label):
-    tmp = simpledialog.askfloat(title="Parameter a", prompt="Input parameter a's value", initialvalue=self.a_value, minvalue=self.a_slider_from_, maxvalue=self.a_slider_to)
-    if tmp is not None:
-      self.a_value = tmp
-      label.config(self.a_value)
-      slider.set(self.a_value)
+  # def editADialog(self, slider: tk.Scale, label: tk.Label):
+  #   tmp = simpledialog.askfloat(title="Parameter a", prompt="Input parameter a's value", initialvalue=self.a_value, minvalue=self.a_slider_from_, maxvalue=self.a_slider_to)
+  #   if tmp is not None:
+  #     self.a_value = tmp
+  #     label.config(self.a_value)
+  #     slider.set(self.a_value)
 
-  # Parameter b functions
-  def setBSlider(self):
-    self.b_min_from = 1
-    self.b_min_to = 15
-    self.b_slider_from_ = self.b_min_from
-    self.b_slider_to = self.b_min_to
-    self.b_slider_pad = 5
-    self.b_is_gray = False
-    func = self.setBUpdater(*self.accessory.addLabelledScale(self.b_slider_from_, self.b_slider_to, self.b_value, self.row_count))
-    self.accessory.popupCalls.append(func)
-    self.row_count += 1
+  # # Parameter b functions
+  # def setBSlider(self):
+  #   self.b_min_from = 1
+  #   self.b_min_to = 15
+  #   self.b_slider_from_ = self.b_min_from
+  #   self.b_slider_to = self.b_min_to
+  #   self.b_slider_pad = 5
+  #   self.b_is_gray = False
+  #   func = self.setBUpdater(*self.accessory.addLabelledScale(self.b_slider_from_, self.b_slider_to, self.b_value, self.row_count))
+  #   self.accessory.popupCalls.append(func)
+  #   self.row_count += 1
 
-  def setBUpdater(self, slider: ttk.Scale, label: tk.Label, button: tk.Button, index: int):
-    slider.config(command=lambda: self.updateBLabel(slider, label, index))
-    button.config(command=lambda: self.editBDialog(slider, label, index))
+  # def setBUpdater(self, slider: ttk.Scale, label: tk.Label, button: tk.Button, index: int):
+  #   slider.config(command=lambda: self.updateBLabel(slider, label, index))
+  #   button.config(command=lambda: self.editBDialog(slider, label, index))
 
-  def updateBLabel(self, slider: tk.Scale, label: tk.Label, index: int):
-    if self.b_value > self.b_min_from:
-      self.b_slider_from_, self.b_slider_to = self.accessory.variableSliderBounds(self.b_slider_from_, self.b_slider_to, self.b_slider_pad, self.b_value, self.b_min_from, self.b_min_to, None, None)
-      func = lambda row_count: self.setBUpdater(*self.accessory.addLabelledScale(self.b_slider_from_, self.b_slider_to, self.b_value, row_count))
-      self.accessory.popupCalls[index] = func
+  # def updateBLabel(self, slider: tk.Scale, label: tk.Label, index: int):
+  #   if self.b_value > self.b_min_from:
+  #     self.b_slider_from_, self.b_slider_to = self.accessory.variableSliderBounds(self.b_slider_from_, self.b_slider_to, self.b_slider_pad, self.b_value, self.b_min_from, self.b_min_to, None, None)
+  #     func = lambda row_count: self.setBUpdater(*self.accessory.addLabelledScale(self.b_slider_from_, self.b_slider_to, self.b_value, row_count))
+  #     self.accessory.popupCalls[index] = func
 
-    if self.b_is_gray:
-      slider.config(style="Gray.Horizontal.TScale")
-      slider.set(self.b_value)
-    else:
-      slider.config(style="Modified.Horizontal.TScale")
-      self.b_value = slider.get()
-    label.config(self.b_value)
+  #   if self.b_is_gray:
+  #     slider.config(style="Gray.Horizontal.TScale")
+  #     slider.set(self.b_value)
+  #   else:
+  #     slider.config(style="Modified.Horizontal.TScale")
+  #     self.b_value = slider.get()
+  #   label.config(self.b_value)
 
-  def editBDialog(self, slider: tk.Scale, label: tk.Label, index: int):
-    tmp = simpledialog.askfloat(title="Parameter b", prompt="Input parameter b's value", initialvalue=self.b_value, minvalue=self.b_min_from)
-    if tmp is not None:
-      self.b_value = tmp
-      self.updateBLabel(slider, label, index)
+  # def editBDialog(self, slider: tk.Scale, label: tk.Label, index: int):
+  #   tmp = simpledialog.askfloat(title="Parameter b", prompt="Input parameter b's value", initialvalue=self.b_value, minvalue=self.b_min_from)
+  #   if tmp is not None:
+  #     self.b_value = tmp
+  #     self.updateBLabel(slider, label, index)
 
 def main():
-  graph = Graph(tt)
+  _ = Graph(tt)
 
   return "EVENTLOOP"
 

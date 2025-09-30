@@ -1,119 +1,146 @@
 #include <iostream>
 #include <random>
 #include <cmath>
+#include <string>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-#define C (1 + (3.0 * M_PI) / 2)
+#define AB (1 + (3.0 * M_PI) / 2)
 
 using namespace std;
+
 // Function prototypes
-double random_double(double min, double max, std::mt19937 mt);
+
+// Function to generate a random double between min and max
+double random_double(double min, double max, mt19937 mt);
+// Function to get the next odd integer >= value
 int next_odd(int value);
 // Function to generate a valid odd b within range
-int random_valid_b(int min_b, int max_b, std::mt19937 mt);
-
-// Export macro for DLL functions
-#ifndef EXPORT
-#define EXPORT __declspec(dllexport)  
-#endif
-
+int random_valid_b(int min_b, int max_b, mt19937 mt);
 // Function to generate random a and b values
-extern "C" EXPORT double* random_a_b(double* a_p = nullptr, int* b_p = nullptr, int *range_p = nullptr);
+double* random_a_b(char* a_p, char* b_p, char* range_p);
 // Weierstrass function: W(a, b, x) = sum_{n=0}^{N} a^n * cos(b^n * pi * x)
-extern "C" EXPORT double weierstrass(double a, double b, double x, int n = 0);
+double weierstrass(double a, double b, double x, int n = 0);
 // Weierstrass group function: generates N points in the range [min_x, max_x]
 // Returns an array of size N*2+1, where the first element is N,
 // followed by pairs of x and y values.
-// The y value is calculated using the Weierstrass function.
-extern "C" EXPORT double* weierstrassGroup(double a, double b, double min_x, double max_x, int n = 0, int N = 100);
+double* weierstrassGroup(double a, double b, double min_x, double max_x, int n = 0, int N = 100);
 // Function to free the dynamically allocated double pointer
-// This function should be called to avoid memory leaks
-extern "C" EXPORT void freeDblPointer(double* arr);
+void freeDblPointer(double* arr);
 
-// Function to generate a random double between min and max
-double random_double(double min, double max, std::mt19937 mt) {
-  std::uniform_int_distribution<int> int_dist(min, max);
-  return int_dist(mt);
+double random_double(double min, double max, mt19937 mt) {
+    uniform_real_distribution<double> dist(min, max);
+    return dist(mt);
 }
 
-// Function to get the next odd integer >= value
 int next_odd(int value) {
-  return (value % 2 == 0) ? value + 1: value;
+    return (value % 2 == 0) ? value + 1 : value;
 }
 
-// Function to generate a valid odd b within range
-int random_valid_b(int min_b, int max_b, std::mt19937 mt) {
-  if (min_b % 2 == 0) min_b++; // make min odd
-  if (max_b % 2 == 0) max_b++; // make max odd
+int random_valid_b(int min_b, int max_b, mt19937 mt) {
+    if (min_b % 2 == 0) min_b++; // make min odd
+    if (max_b % 2 == 0) max_b++; // make max odd
 
-  int count = (max_b - min_b) / 2 + 1;
-  std::uniform_int_distribution<int> int_dist(0, count - 1);
-  return min_b + 2 * int_dist(mt);
+    int count = (max_b - min_b) / 2 + 1;
+    uniform_int_distribution<int> int_dist(0, count - 1);
+    return min_b + 2 * int_dist(mt);
 }
 
-extern "C" {
-  double* random_a_b(double* a_p, int* b_p, int *range_p) {
-    std::random_device rd;
-    std::mt19937 mt(rd());
-    double a;
-    int b, range;
+double* random_a_b(char* a_p, char* b_p, char* range_p) {
+    random_device rd;
+    mt19937 mt(rd());
 
-    if (a_p == nullptr) {
-      // Randomize a between 0 (inclusive) and 1 (exclusive)
-      std::uniform_real_distribution<double> double_dist(0.0, 1.0);
-      a = double_dist(mt);
-      while (a == 0.0) a = double_dist(mt);
+    double a = random_double(0.1, 0.9, mt);
+    int b = random_valid_b(1, 101, mt);
+    int range = b;
+
+    if (string(a_p) != "None") a = strtod(a_p, nullptr);
+    if (string(b_p) !=  "None") {
+        b = strtol(b_p, nullptr, 0);
+        range = b;
     }
-    else a = *a_p;
-
-    if (b_p == nullptr) {
-      // Calculate minimum b and ensure it is an odd integer
-      int min_b = std::max(3, next_odd(ceil(C / a)));
-
-      if (range_p == nullptr) range = 100;
-      else range = *range_p;
-
-      // Randomize a valid b within a limited range
-      int max_b = min_b + range;
-      b = random_valid_b(min_b, max_b, mt);
-    }
-    else b = *b_p;
-
-    double *arr = new double[3];
-    arr[0] = a;
-    arr[1] = static_cast<double>(b);
-    arr[2] = static_cast<double>(range);
-
-    return arr;
-  }
-
-  double weierstrass(double a, double b, double x, int n) {
-    double y = 0;
-    for (std::size_t i = 0; i <= n; i++){
-      y += pow(a, n) * cos(pow(b, n) * M_PI * x);
+    if (string(range_p) != "None") {
+        int r = strtol(range_p, nullptr, 0);
+        if (r > 0) { // Ensure range is positive
+            range = r;
+            b = random_valid_b(1, range, mt);
+        }
     }
 
-    return y;
-  }
+    double* result = new double[3];
+    result[0] = a;
+    result[1] = b;
+    result[2] = range;
 
-  double* weierstrassGroup(double a, double b, double min_x, double max_x, int n, int N) {
-    double delta = (max_x - min_x) / (N - 1);
-    double *x_y_values = new double[N*2+1];
-    x_y_values[0] = N;
+    return result;
+}
 
-    for (std::size_t i = 0; i < N; i++) {
-      double x = min_x + i * delta;
-      x_y_values[i*2+1] = x;
-      x_y_values[i*2+2] = weierstrass(a, b, x, n);
+double weierstrass(double a, double b, double x, int n) {
+    double sum = 0.0;
+    for (int i = 0; i <= n; ++i) {
+        sum += pow(a, i) * cos(pow(b, i) * M_PI * x);
+    }
+    return sum;
+}
+
+double* weierstrassGroup(double a, double b, double min_x, double max_x, int n, int N) {
+    if (N <= 0 || n < 0) return nullptr;
+    if (min_x >= max_x) return nullptr;
+
+    double* result = new double[N * 2 + 1];
+    result[0] = N; // First element is N
+    double step = (max_x - min_x) / N;
+
+    for (int i = 0; i <= N; ++i) {
+        double x = min_x + i * step;
+        result[i * 2 + 1] = x; // x value
+        result[i * 2 + 2] = weierstrass(a, b, x, n); // y value
     }
 
-    return x_y_values;
-  }
+    return result;
+}
 
-  void freeDblPointer(double* arr) {
-    delete [] arr;
-  }
+void freeDblPointer(double* arr) {
+    delete[] arr;
+}
+
+int main(int argc, char* argv[]) {
+    // Example usage
+     // Default values
+    double min_x = strtod(argv[4], nullptr);
+    double max_x = strtod(argv[5], nullptr);
+    int n = strtol(argv[6], nullptr, 10);
+    int N = strtol(argv[7], nullptr, 10);
+    if (argc < 8) {
+        cerr << "Usage: " << argv[0] << " <a> <b> <range> <min_x> <max_x> <n> <N>" << endl;
+        return 1;
+    }
+    if (min_x >= max_x) {
+        cerr << "Error: min_x must be less than max_x." << endl;
+        return 1;
+    }
+    if (n < 0 || N <= 0) {
+        cerr << "Error: n must be non-negative and N must be positive." << endl;
+        return 1;
+    }
+
+    double* abr = random_a_b(argv[1], argv[2], argv[3]);
+    double a = abr[0];
+    double b = abr[1];
+    double range = abr[2];
+
+    printf("Random a: %.2f, b: %d, range: %d\n", a, static_cast<int>(b), static_cast<int>(range));
+
+    double* group = weierstrassGroup(a, b, min_x, max_x, n, N);
+
+    cout << "Weierstrass Group:" << endl;
+    cout << group[0] << " points generated." << endl;
+    cout << "x and y values:" << endl;
+    for (int i = 0; i <= N; ++i) {
+        cout << "(" << i << ") " << "x: " << group[i * 2 + 1] << ", y: " << group[i * 2 + 2] << endl;
+    }
+    
+    return 0;
 }
